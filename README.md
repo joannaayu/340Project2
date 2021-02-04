@@ -1,1 +1,4 @@
-# 340Project2
+# Reliable Streaming Network Transport Simulator
+
+by Steve Tarzia
+
