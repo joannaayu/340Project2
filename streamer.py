@@ -3,6 +3,8 @@ from lossy_socket import LossyUDP
 # do not import anything else from socket except INADDR_ANY
 from socket import INADDR_ANY
 
+from struct import *
+
 
 class Streamer:
     def __init__(self, dst_ip, dst_port,
@@ -14,21 +16,86 @@ class Streamer:
         self.dst_ip = dst_ip
         self.dst_port = dst_port
 
+        #sequence numbers
+        self.seq_num = 0
+        self.recv_num = 0
+
+        #send & receive buffers
+        self.s_buff = {}
+        self.r_buff = {}
+
+        #whether or not to close
+        self.close = False
+
+
+
     def send(self, data_bytes: bytes) -> None:
         """Note that data_bytes can be larger than one packet."""
         # Your code goes here!  The code below should be changed!
 
-        # for now I'm just sending the raw application-level data in one UDP payload
-        self.socket.sendto(data_bytes, (self.dst_ip, self.dst_port))
+        while len(data_bytes) > 1472:
+            header = pack('i', self.seq_num)
+
+            sbytes = header + data_bytes[0:1472]
+
+            self.socket.sendto(sbytes, (self.dst_ip, self.dst_port))
+
+            data_bytes = data_bytes[1472:]
+
+            self.seq_num = self.seq_num + 1
+
+            self.s_buff[self.seq_num] = sbytes
+
+        header = pack('i', self.seq_num)
+
+        sbytes = header + data_bytes
+
+        self.socket.sendto(sbytes, (self.dst_ip, self.dst_port))
+
+        self.seq_num = self.seq_num + 1
+
 
     def recv(self) -> bytes:
         """Blocks (waits) if no data is ready to be read from the connection."""
         # your code goes here!  The code below should be changed!
-        
+
+        while True:
+
+            while self.recv_num in self.r_buff:
+
+                data = self.r_buff[self.recv_num]
+
+                del self.r_buff[self.recv_num]
+
+                self.recv_num += 1
+
+                return data
+
+            data, addr = self.socket.recvfrom(1472)
+
+            recv_header = unpack('i', data[0:4])[0]
+
+            data = data[4:]
+
+            self.r_buff[recv_header] = data
+
+            total_data = data
+
+            while self.recv_num in self.r_buff:
+
+                data = self.r_buff[self.recv_num]
+
+                del self.r_buff[self.recv_num]
+
+                self.recv_num += 1
+
+                return data
+
+
         # this sample code just calls the recvfrom method on the LossySocket
-        data, addr = self.socket.recvfrom()
+
         # For now, I'll just pass the full UDP payload to the app
-        return data
+        # return data
 
     def close(self) -> None:
         """Cleans up. It should block (wait) until the Streamer is done with all
