@@ -24,41 +24,29 @@ class Streamer:
         self.s_buff = {}
         self.r_buff = {}
 
-        #whether or not to close
-        self.close = False
-
-
-
     def send(self, data_bytes: bytes) -> None:
         """Note that data_bytes can be larger than one packet."""
         # Your code goes here!  The code below should be changed!
 
-        while len(data_bytes) > 1472:
+        while len(data_bytes) > 1468:
             header = pack('i', self.seq_num)
-
-            sbytes = header + data_bytes[0:1472]
-
+            sbytes = header + data_bytes[0:1468]
             self.socket.sendto(sbytes, (self.dst_ip, self.dst_port))
-
-            data_bytes = data_bytes[1472:]
+            data_bytes = data_bytes[1468:]
 
             self.seq_num = self.seq_num + 1
 
-            self.s_buff[self.seq_num] = sbytes
+            #self.s_buff[self.seq_num] = sbytes
 
         header = pack('i', self.seq_num)
-
         sbytes = header + data_bytes
-
         self.socket.sendto(sbytes, (self.dst_ip, self.dst_port))
-
         self.seq_num = self.seq_num + 1
 
 
     def recv(self) -> bytes:
         """Blocks (waits) if no data is ready to be read from the connection."""
         # your code goes here!  The code below should be changed!
-
         while True:
 
             while self.recv_num in self.r_buff:
