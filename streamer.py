@@ -5,7 +5,6 @@ from socket import INADDR_ANY
 
 from struct import *
 
-
 class Streamer:
     def __init__(self, dst_ip, dst_port,
                  src_ip=INADDR_ANY, src_port=0):
@@ -21,7 +20,7 @@ class Streamer:
         self.recv_num = 0
 
         #send & receive buffers
-        self.s_buff = {}
+        #self.s_buff = {}
         self.r_buff = {}
 
     def send(self, data_bytes: bytes) -> None:
@@ -49,41 +48,21 @@ class Streamer:
         # your code goes here!  The code below should be changed!
         while True:
 
-            while self.recv_num in self.r_buff:
+            #can be while loop too
+            if self.recv_num in self.r_buff:
 
                 data = self.r_buff[self.recv_num]
-
-                del self.r_buff[self.recv_num]
-
+                # dont technically need this
+                # del self.r_buff[self.recv_num]
                 self.recv_num += 1
 
                 return data
 
             data, addr = self.socket.recvfrom(1472)
-
             recv_header = unpack('i', data[0:4])[0]
-
             data = data[4:]
-
             self.r_buff[recv_header] = data
 
-            total_data = data
-
-            while self.recv_num in self.r_buff:
-
-                data = self.r_buff[self.recv_num]
-
-                del self.r_buff[self.recv_num]
-
-                self.recv_num += 1
-
-                return data
-
-
-        # this sample code just calls the recvfrom method on the LossySocket
-
-        # For now, I'll just pass the full UDP payload to the app
-        # return data
 
     def close(self) -> None:
         """Cleans up. It should block (wait) until the Streamer is done with all
