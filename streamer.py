@@ -2,8 +2,12 @@
 from lossy_socket import LossyUDP
 # do not import anything else from socket except INADDR_ANY
 from socket import INADDR_ANY
-
+#import struct needed for send function
 from struct import *
+#import for background listening
+import concurrent.futures
+from concurrent.futures import ThreadPoolExecutor
+
 
 class Streamer:
     def __init__(self, dst_ip, dst_port,
@@ -23,6 +27,14 @@ class Streamer:
         #self.s_buff = {}
         self.r_buff = {}
 
+        self.closed = False
+
+        #creating an executor with max (1) thread
+        executor = ThreadPoolExecutor(max_workers=1)
+        #submits a task and gets a future, allows us to ask later if the task is resolved
+        future = executor.submit(self.listener)
+        print("created executor!")
+
     def send(self, data_bytes: bytes) -> None:
         """Note that data_bytes can be larger than one packet."""
         # Your code goes here!  The code below should be changed!
@@ -39,6 +51,7 @@ class Streamer:
 
         header = pack('i', self.seq_num)
         sbytes = header + data_bytes
+        #print(sbytes)
         self.socket.sendto(sbytes, (self.dst_ip, self.dst_port))
         self.seq_num = self.seq_num + 1
 
@@ -58,14 +71,35 @@ class Streamer:
 
                 return data
 
-            data, addr = self.socket.recvfrom(1472)
-            recv_header = unpack('i', data[0:4])[0]
-            data = data[4:]
-            self.r_buff[recv_header] = data
+            # data, addr = self.socket.recvfrom(1472)
+            # recv_header = unpack('i', data[0:4])[0]
+            # #print(recv_header)
+            # data = data[4:]
+            # self.r_buff[recv_header] = data
+            # print(data, 'recv function-----------------------')
+            #print(self.r_buff)
 
+    def listener(self):
+        #code taken from the project page so far
+        while not self.closed:
+            try:
+                data, addr = self.socket.recvfrom(1472)
+                recv_header = unpack('i', data[0:4])[0]
+                #print(recv_header)
+                data = data[4:]
+                self.r_buff[recv_header] = data
+                print(data, 'listener -----------------------')
+                # print(addr)
+                #r_buff{data} = data
+            except Exception as e:
+                print("listener died, uh o!")
+                print(e)
+
+        print(future.done())
 
     def close(self) -> None:
         """Cleans up. It should block (wait) until the Streamer is done with all
            the necessary ACKs and retransmissions"""
         # your code goes here, especially after you add ACKs and retransmissions.
-        pass
+        self.closed = True
+        self.socket.stoprecv()
