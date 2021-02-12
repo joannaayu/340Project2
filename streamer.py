@@ -10,7 +10,6 @@ from concurrent.futures import ThreadPoolExecutor
 
 import time
 
-from socket import timeout
 
 
 
@@ -58,6 +57,7 @@ class Streamer:
             self.socket.sendto(sbytes, (self.dst_ip, self.dst_port))
 
             self.s_buff[self.seq_num] = sbytes
+
             data_bytes = data_bytes[1460:]
 
             self.seq_num = self.seq_num + 1
@@ -65,31 +65,59 @@ class Streamer:
 
         header = pack('i', self.fin_num) + pack('i', self.ack_num) + pack('i', self.seq_num)
         sbytes = header + data_bytes
+
         self.socket.sendto(sbytes, (self.dst_ip, self.dst_port))
         self.s_buff[self.seq_num] = sbytes
         self.seq_num = self.seq_num + 1
 
         # r = Timer(10, self.resend, sbytes)
+        self.ack = False
 
-        self.socket.settimeout(10)
+        time.sleep(.25)
 
         if self.ack == True:
-            del self.s_buff[self.seq_num]
+            print('chill')
 
-        else:
-            self.resend(sbytes)
+        ack_counter = 0
 
+        while self.ack != True:
+            time.sleep(.25)
+            
+            if self.ack == False:
+                self.socket.sendto(sbytes, (self.dst_ip, self.dst_port))
+                ack_counter = ack_counter + 1
+                print("this how many times", ack_counter)
+            else:
+                break
+
+
+            ack_counter = ack_counter + 1
+            print("this how many times", ack_counter)
+
+        if self.seq_num == 1000:
+            while not self.ack:
+                time.sleep(.01)
 
 
     def resend(self, data_bytes: bytes) -> None:
 
         try:
-            # print('sending in resend')
+            print('sending in resend')
+            print(self.ack)
+            print(self.ack_num)
 
             self.socket.sendto(data_bytes, (self.dst_ip, self.dst_port))
+
         except:
             print("EROOROROORO: cnat resend")
             return
+
+
+
+        # else:
+        #     print('in else case')
+        #     time.sleep(.25)
+        #     self.resend(data_bytes)
 
 
     def recv(self) -> bytes:
@@ -111,44 +139,46 @@ class Streamer:
         #code taken from the project page so far
         while not self.closed:
             try:
+
                 data, addr = self.socket.recvfrom()
 
                 fin_header = unpack('i', data[0:4])[0]
                 ack_header = unpack('i', data[4:8])[0]
                 recv_header = unpack('i', data[8:12])[0]
 
+                print(fin_header)
+                print(ack_header)
+                print(recv_header)
 
                 data = data[12:]
 
                 self.r_buff[recv_header] = data
 
-                #check if ACK or data
-                # if ack_header == 1:
-                #     self.ack = True
-                #     print('send ack')
-
                 if ack_header == 0:
+                    ack_header = 1
                     self.ack = True
-                    self.ack_num = 1
-                    header = pack('i', self.fin_num) + pack('i', self.ack_num) + pack('i', self.seq_num)
-                    data = header + data
+                    header = pack('i', fin_header) + pack('i', ack_header) + pack('i', recv_header)
 
-                    try:
-                        self.socket.sendto(data, (self.dst_ip, self.dst_port))
-                        # print('ack sent')
+                    self.socket.sendto(header, (self.dst_ip, self.dst_port))
 
-                    except:
-                        print("error sending ack")
+                    print('ack sent')
+                    print(self.ack)
+
+                    # except:
+                    #     print("error sending ack")
 
                 elif ack_header == 1:
 
-                    # print('ack recv')
+                    self.ack = True
+                    # print("This is listener ack", self.ack)
 
+                    # self.ack = True
+                    print('ack recv', recv_header)
 
-                    if recv_header in self.s_buff:
-                        hello = self.s_buff[recv_header]
-
-                        self.s_buff.pop(recv_header)
+                    # if recv_header in self.s_buff:
+                    #     hello = self.s_buff[recv_header]
+                    #
+                    #     self.s_buff.pop(recv_header)
 
 
                 # if recv_header > 0:
