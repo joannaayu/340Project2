@@ -8,6 +8,12 @@ from struct import *
 import concurrent.futures
 from concurrent.futures import ThreadPoolExecutor
 
+import time
+
+from socket import timeout
+
+
+
 
 class Streamer:
     def __init__(self, dst_ip, dst_port,
@@ -23,12 +29,17 @@ class Streamer:
         self.seq_num = 0
         self.recv_num = 0
 
+
+        self.fin_num = 0
+        self.ack_num = 0
+
         #send & receive buffers
-        #self.s_buff = {}
+        self.s_buff = {}
         self.r_buff = {}
         self.s_buff = {}
 
         self.closed = False
+        self.ack = False
 
         #creating an executor with max (2) thread
         executor = ThreadPoolExecutor(max_workers=1)
@@ -40,25 +51,45 @@ class Streamer:
         """Note that data_bytes can be larger than one packet."""
         # Your code goes here!  The code below should be changed!
 
-        while len(data_bytes) > 1468:
-            header = pack('i', self.seq_num)
-            sbytes = header + data_bytes[0:1468]
+
+        while len(data_bytes) > 1460:
+            header = pack('i', self.fin_num) + pack('i', self.ack_num) + pack('i', self.seq_num)
+            sbytes = header + data_bytes[0:1460]
             self.socket.sendto(sbytes, (self.dst_ip, self.dst_port))
+
             self.s_buff[self.seq_num] = sbytes
-            data_bytes = data_bytes[1468:]
+            data_bytes = data_bytes[1460:]
 
             self.seq_num = self.seq_num + 1
-            #self.s_buff[self.seq_num] = sbytes
+            self.s_buff[self.seq_num] = sbytes
 
-        header = pack('i', self.seq_num)
-        #print(header)
+        header = pack('i', self.fin_num) + pack('i', self.ack_num) + pack('i', self.seq_num)
         sbytes = header + data_bytes
-        #print(sbytes)
         self.socket.sendto(sbytes, (self.dst_ip, self.dst_port))
         self.s_buff[self.seq_num] = sbytes
         self.seq_num = self.seq_num + 1
-        #print('packet num check', self.seq_num, data_bytes[0:1468], 'stored in sbytes', sbytes)
 
+        # r = Timer(10, self.resend, sbytes)
+
+        self.socket.settimeout(10)
+
+        if self.ack == True:
+            del self.s_buff[self.seq_num]
+
+        else:
+            self.resend(sbytes)
+
+
+
+    def resend(self, data_bytes: bytes) -> None:
+
+        try:
+            # print('sending in resend')
+
+            self.socket.sendto(data_bytes, (self.dst_ip, self.dst_port))
+        except:
+            print("EROOROROORO: cnat resend")
+            return
 
 
     def recv(self) -> bytes:
@@ -67,7 +98,7 @@ class Streamer:
         while True:
             #can be while loop too
             if self.recv_num in self.r_buff:
-                #print('IN OUR RECV FUNC', self.recv_num, 'CURR R_BUFF IS:', self.r_buff)
+
                 data = self.r_buff[self.recv_num]
                 #cleans up the r_buff after packet is sent to instance 1
                 del self.r_buff[self.recv_num]
@@ -75,43 +106,65 @@ class Streamer:
 
                 return data
 
-            # data, addr = self.socket.recvfrom(1472)
-            # recv_header = unpack('i', data[0:4])[0]
-            # #print(recv_header)
-            # data = data[4:]
-            # self.r_buff[recv_header] = data
-            #print(self.r_buff)
 
     def listener(self):
         #code taken from the project page so far
         while not self.closed:
             try:
                 data, addr = self.socket.recvfrom()
-                recv_header = unpack('i', data[0:4])[0]
-                #print('HEADER IS', recv_header)
-                data = data[4:]
-                #print('DATA IS', data)
-                #self.r_buff[recv_header] = data
-                # print(addr)
-                #r_buff{data} = data
+
+                fin_header = unpack('i', data[0:4])[0]
+                ack_header = unpack('i', data[4:8])[0]
+                recv_header = unpack('i', data[8:12])[0]
+
+
+                data = data[12:]
+
+                self.r_buff[recv_header] = data
 
                 #check if ACK or data
-                if recv_header > 0:
-                    #print('NEW DATA IS', data)
-                    self.r_buff[recv_header] = data
-                    #print('RBUFF IS', self.r_buff)
+                # if ack_header == 1:
+                #     self.ack = True
+                #     print('send ack')
 
-                elif recv_header < 0:
-                    check_header = recv_header * -1
-                    if check_header in self.s_buffer:
-                        self.s_buffer.pop(check_header)
+                if ack_header == 0:
+                    self.ack = True
+                    self.ack_num = 1
+                    header = pack('i', self.fin_num) + pack('i', self.ack_num) + pack('i', self.seq_num)
+                    data = header + data
 
+                    try:
+                        self.socket.sendto(data, (self.dst_ip, self.dst_port))
+                        # print('ack sent')
+
+                    except:
+                        print("error sending ack")
+
+                elif ack_header == 1:
+
+                    # print('ack recv')
+
+
+                    if recv_header in self.s_buff:
+                        hello = self.s_buff[recv_header]
+
+                        self.s_buff.pop(recv_header)
+
+
+                # if recv_header > 0:
+                #     #print('NEW DATA IS', data)
+                #
+                #     self.r_buff[recv_header] = data
+                #     #print('RBUFF IS', self.r_buff)
+                #
+                # elif recv_header < 0:
+                #     check_header = recv_header * -1
+                #     if check_header in self.s_buffer:
+                #         self.s_buffer.pop(check_header)
 
             except Exception as e:
                 print("listener died, uh o!")
                 print(e)
-
-
 
     def close(self) -> None:
         """Cleans up. It should block (wait) until the Streamer is done with all
