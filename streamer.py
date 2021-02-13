@@ -9,6 +9,7 @@ import concurrent.futures
 from concurrent.futures import ThreadPoolExecutor
 
 import time
+import hashlib
 
 
 class Streamer:
@@ -35,6 +36,7 @@ class Streamer:
 
         self.closed = False
 
+        #checks for our fin ack
         self.fin = False
         self.finack = False
 
@@ -50,12 +52,15 @@ class Streamer:
         """Note that data_bytes can be larger than one packet."""
         # Your code goes here!  The code below should be changed!
 
-        while len(data_bytes) > 1460:
+        while len(data_bytes) > 1444:
 
             self.r_buff = {}
             header = pack('i', 0) + pack('i', 0) + pack('i', self.seq_num)
-            sbytes = header + data_bytes[0:1460]
-            data_bytes = data_bytes[1460:]
+            hash = hashlib.md5(pack('i', self.fin_num) + pack('i', self.ack_num) + pack('i', self.seq_num) + data_bytes[0:1444])
+            digested_hash = hash.digest()
+            #print(digested_hash)
+            sbytes = digested_hash + header + data_bytes[0:1444]
+            data_bytes = data_bytes[1444:]
 
             self.socket.sendto(sbytes, (self.dst_ip, self.dst_port))
 
@@ -75,8 +80,11 @@ class Streamer:
             # self.s_buff[self.seq_num] = sbytes
 
         header = pack('i', 0) + pack('i', 0) + pack('i', self.seq_num)
-        sbytes = header + data_bytes
-
+        hash = hashlib.md5(pack('i', self.fin_num) + pack('i', self.ack_num) + pack('i', self.seq_num) + data_bytes)
+        digested_hash = hash.digest()
+        #print('DIGESTED HASH IN SEND', digested_hash)
+        sbytes = digested_hash + header + data_bytes
+        #print('SBYTES BEFORE SEND', sbytes)
         self.socket.sendto(sbytes, (self.dst_ip, self.dst_port))
         # self.s_buff[self.seq_num] = sbytes
         self.seq_num = self.seq_num + 1
@@ -115,39 +123,56 @@ class Streamer:
             try:
 
                 data, addr = self.socket.recvfrom()
-                fin_header = unpack('i', data[0:4])[0]
-                ack_header = unpack('i', data[4:8])[0]
-                recv_header = unpack('i', data[8:12])[0]
+
+                hash_check = data[0:16]
+                #print('HASH CHECK IN LISTENER', hash_check)
+
+                fin_header = unpack('i', data[16:20])[0]
+                ack_header = unpack('i', data[20:24])[0]
+                recv_header = unpack('i', data[24:28])[0]
+
+                digested_data = hashlib.md5(data[16:]).digest()
+                #print('DIGESTED DATA', digested_data)
 
                 if fin_header == 1:
-                    if ack_header == 0:
-                        header = pack('i', 1) + pack('i', 1) + pack('i', recv_header)
-                        self.fin = True
-                        self.finack = True
+                    if hash_check == digested_data:
+                        #print('HASH SUCCESS IN FIN CHECK', hash_check, digested_data)
+                        if ack_header == 0:
+                            if hash_check == digested_data:
+                                #print('HASH SUCCESS IN FINACK', hash_check, digested_data)
+                                header = pack('i', 1) + pack('i', 1) + pack('i', recv_header)
+                                self.fin = True
+                                self.finack = True
 
-                        self.socket.sendto(header, (self.dst_ip, self.dst_port))
+                                self.socket.sendto(header, (self.dst_ip, self.dst_port))
 
-                    else:
-                        print('FINACK RECV')
-                        self.finack = True
-                        self.fin = True
-                        self.close()
+                        else:
+                            print('FINACK RECV')
+                            self.finack = True
+                            self.fin = True
+                            self.close()
 
                 elif fin_header == 0 and ack_header == 0:
-                    data = data[12:]
-                    self.r_buff[recv_header] = data
+                    if hash_check == digested_data:
+                        #print('HASH SUCCESS IN SECOND ELIF', hash_check, digested_data)
+                        data = data[28:]
+                        self.r_buff[recv_header] = data
 
-                    ack_header = 1
-                    self.ack = True
+                        ack_header = 1
+                        self.ack = True
 
-                    header = pack('i', fin_header) + pack('i', ack_header) + pack('i', recv_header)
-                    self.socket.sendto(header, (self.dst_ip, self.dst_port))
+                        header = pack('i', fin_header) + pack('i', ack_header) + pack('i', recv_header)
+                        hash = hashlib.md5(pack('i', fin_header) + pack('i', ack_header) + pack('i', recv_header)).digest()
+                        packet_ack = hash + header
+                        self.socket.sendto(packet_ack, (self.dst_ip, self.dst_port))
 
-                    print('ack sent', recv_header, self.ack)
+                        #print('ack sent', recv_header, self.ack)
 
                 elif fin_header == 0 and ack_header == 1:
-                    self.ack = True
-                    print('ack recv', recv_header, self.ack)
+                    if hash_check == digested_data:
+                        #print('HASH SUCCESS IN LAST ELIF', hash_check, digested_data)
+                        self.ack = True
+                        #print('ack recv', recv_header, self.ack)
 
 
             except Exception as e:
@@ -161,7 +186,9 @@ class Streamer:
 
         if self.fin == False:
             fin_header = pack('i', 1) + pack('i', 0) + pack('i', self.seq_num)
-            self.socket.sendto(fin_header, (self.dst_ip, self.dst_port))
+            fin_hash = hashlib.md5(pack('i', 1) + pack('i', 0) + pack('i', self.seq_num)).digest()
+            fin_pack = fin_hash + fin_header
+            self.socket.sendto(fin_pack, (self.dst_ip, self.dst_port))
             self.finack = False
 
             time.sleep(.25)
