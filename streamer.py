@@ -33,11 +33,17 @@ class Streamer:
         self.ack_num = 0
 
         #send & receive buffers
-        self.s_buff = {}
+        # self.s_buff = {}
         self.r_buff = {}
-        self.s_buff = {}
+
 
         self.closed = False
+
+        #
+        self.fin = False
+        self.finack = False
+
+
         self.ack = False
 
         #creating an executor with max (2) thread
@@ -51,73 +57,61 @@ class Streamer:
         # Your code goes here!  The code below should be changed!
 
 
+
+
         while len(data_bytes) > 1460:
-            header = pack('i', self.fin_num) + pack('i', self.ack_num) + pack('i', self.seq_num)
+
+            print('in sending while loop seqnum', self.seq_num)
+
+            header = pack('i', 0) + pack('i', 0) + pack('i', self.seq_num)
             sbytes = header + data_bytes[0:1460]
+
             self.socket.sendto(sbytes, (self.dst_ip, self.dst_port))
 
-            self.s_buff[self.seq_num] = sbytes
+            self.ack = False
+            time.sleep(.25)
+            print('in sending while loop ack', self.ack)
 
+            while self.ack != True:
+                print('in TIMEOUT while loop ack', self.ack)
+
+                time.sleep(.25)
+
+                if self.ack == False:
+                    self.socket.sendto(sbytes, (self.dst_ip, self.dst_port))
+
+                else:
+                    break
+
+            # self.s_buff[self.seq_num] = sbytes
             data_bytes = data_bytes[1460:]
-
             self.seq_num = self.seq_num + 1
-            self.s_buff[self.seq_num] = sbytes
 
-        header = pack('i', self.fin_num) + pack('i', self.ack_num) + pack('i', self.seq_num)
+                # self.s_buff[self.seq_num] = sbytes
+
+
+        header = pack('i', 0) + pack('i', 0) + pack('i', self.seq_num)
         sbytes = header + data_bytes
 
         self.socket.sendto(sbytes, (self.dst_ip, self.dst_port))
-        self.s_buff[self.seq_num] = sbytes
+        # self.s_buff[self.seq_num] = sbytes
         self.seq_num = self.seq_num + 1
 
-        # r = Timer(10, self.resend, sbytes)
         self.ack = False
 
         time.sleep(.25)
 
-        if self.ack == True:
-            print('chill')
-
-        ack_counter = 0
-
-        while self.ack != True:
+        while not self.ack:
             time.sleep(.25)
-            
             if self.ack == False:
                 self.socket.sendto(sbytes, (self.dst_ip, self.dst_port))
-                ack_counter = ack_counter + 1
-                print("this how many times", ack_counter)
             else:
                 break
 
 
-            ack_counter = ack_counter + 1
-            print("this how many times", ack_counter)
-
-        if self.seq_num == 1000:
+        if self.seq_num == 999:
             while not self.ack:
                 time.sleep(.01)
-
-
-    def resend(self, data_bytes: bytes) -> None:
-
-        try:
-            print('sending in resend')
-            print(self.ack)
-            print(self.ack_num)
-
-            self.socket.sendto(data_bytes, (self.dst_ip, self.dst_port))
-
-        except:
-            print("EROOROROORO: cnat resend")
-            return
-
-
-
-        # else:
-        #     print('in else case')
-        #     time.sleep(.25)
-        #     self.resend(data_bytes)
 
 
     def recv(self) -> bytes:
@@ -146,51 +140,43 @@ class Streamer:
                 ack_header = unpack('i', data[4:8])[0]
                 recv_header = unpack('i', data[8:12])[0]
 
-                print(fin_header)
-                print(ack_header)
-                print(recv_header)
+                # print(fin_header)
+                # print(ack_header)
+                # print(recv_header)
 
                 data = data[12:]
 
                 self.r_buff[recv_header] = data
 
-                if ack_header == 0:
+                if fin_header == 1:
+                    if ack_header == 0:
+                        header = pack('i', 1) + pack('i', 1) + pack('i', recv_header)
+
+                        print ('in fin listener', recv_header)
+                        self.fin = True
+                        self.finack = True
+
+                        self.socket.sendto(header, (self.dst_ip, self.dst_port))
+
+                    else:
+                        print('finack recv')
+                        self.finack = True
+                        self.fin = True
+                        self.close()
+
+                elif fin_header == 0 and ack_header == 0:
                     ack_header = 1
                     self.ack = True
-                    header = pack('i', fin_header) + pack('i', ack_header) + pack('i', recv_header)
 
+                    header = pack('i', fin_header) + pack('i', ack_header) + pack('i', recv_header)
                     self.socket.sendto(header, (self.dst_ip, self.dst_port))
 
-                    print('ack sent')
-                    print(self.ack)
+                    print('ack sent', recv_header, self.ack)
 
-                    # except:
-                    #     print("error sending ack")
-
-                elif ack_header == 1:
-
+                elif fin_header == 0 and ack_header == 1:
                     self.ack = True
-                    # print("This is listener ack", self.ack)
+                    print('ack recv', recv_header, self.ack)
 
-                    # self.ack = True
-                    print('ack recv', recv_header)
-
-                    # if recv_header in self.s_buff:
-                    #     hello = self.s_buff[recv_header]
-                    #
-                    #     self.s_buff.pop(recv_header)
-
-
-                # if recv_header > 0:
-                #     #print('NEW DATA IS', data)
-                #
-                #     self.r_buff[recv_header] = data
-                #     #print('RBUFF IS', self.r_buff)
-                #
-                # elif recv_header < 0:
-                #     check_header = recv_header * -1
-                #     if check_header in self.s_buffer:
-                #         self.s_buffer.pop(check_header)
 
             except Exception as e:
                 print("listener died, uh o!")
@@ -200,5 +186,35 @@ class Streamer:
         """Cleans up. It should block (wait) until the Streamer is done with all
            the necessary ACKs and retransmissions"""
         # your code goes here, especially after you add ACKs and retransmissions.
-        self.closed = True
-        self.socket.stoprecv()
+        print('in close self.fin', self.fin)
+        print('in close self.finack', self.finack)
+
+        if self.fin == False:
+            print("in close", self.seq_num)
+            fin_header = pack('i', 1) + pack('i', 0) + pack('i', self.seq_num)
+            self.socket.sendto(fin_header, (self.dst_ip, self.dst_port))
+            self.finack = False
+
+            ack_counter = 0
+            time.sleep(.25)
+
+            if self.finack == True:
+                print('FINACK RECV')
+
+            while self.finack == False:
+                time.sleep(.25)
+
+                if self.finack == False:
+                    self.socket.sendto(fin_header, (self.dst_ip, self.dst_port))
+                    ack_counter = ack_counter + 1
+                    print("times in our finack loop is", ack_counter)
+                else:
+
+                    break
+
+        elif self.fin and self.finack == True:
+            print('CLOSE SUCCESS -----')
+            time.sleep(2)
+            self.closed = True
+            self.socket.stoprecv()
+            return
