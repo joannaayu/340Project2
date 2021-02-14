@@ -143,7 +143,7 @@ class Streamer:
                     if hash_check == digested_data:
                         if ack_header == 0:
                             if hash_check == digested_data:
-                                    #print('HASH SUCCESS IN SETTING FINACK', hash_check, digested_data)
+                                print('HASH SUCCESS IN SETTING FINACK', hash_check, digested_data)
                                 print(self.finack)
                                 header = pack('i', 1) + pack('i', 1) + pack('i', recv_header)
                                 ack_header = 1
@@ -151,8 +151,9 @@ class Streamer:
                                 fin_ack_pack = hash + header
                                 self.fin = True
                                 self.finack = True
-                                del self.broken_packets[recv_header]
-                                #self.broken_packets.pop(recv_header)
+                                # del self.broken_packets[recv_header]
+                                print(self.broken_packets)
+                                self.broken_packets.pop(recv_header)
 
                                 #print('last recv header', recv_header)
                                 #print('last seq_num', self.last_packet)
@@ -208,20 +209,70 @@ class Streamer:
                 print("listener died, uh o!")
                 print(e)
 
-    def resend(self, d_bytes: bytes) -> None:
-        recv_header = unpack('i', d_bytes[24:28])[0]
-        print('in resend function', recv_header)
+    # def resend(self, d_bytes: bytes) -> None:
+    #     print('in resend')
+    #     recv_header = unpack('i', d_bytes[24:28])[0]
+    #
+    #     # print('before while', self.broken_packets)
+    #
+    #     if recv_header not in self.broken_packets:
+    #         print(recv_header, 'not in bp')
+    #         return
+    #
+    #     self.socket.sendto(d_bytes, (self.dst_ip, self.dst_port))
+    #
+    #     if recv_header in self.broken_packets:
+    #         print('still in buffer resend while loop')
+    #         Timer(.25, self.resend, [d_bytes]).start()
+    #
+    #     else:
+    #         print("finally", recv_header, "sent in resend")
+    #         return
 
-        while recv_header in self.broken_packets:
+    # def resend(self, d_bytes: bytes) -> None:
+    #     recv_header = unpack('i', d_bytes[24:28])[0]
+    #     print('in resend function', recv_header)
+    #
+    #     while recv_header in self.broken_packets:
+    #
+    #         print('now resending packet', recv_header)
+    #         #print(self.broken_packets)
+    #         self.socket.sendto(d_bytes, (self.dst_ip, self.dst_port))
+    #
+    #         if recv_header in self.broken_packets:
+    #             return
+    #         else:
+    #             print('in sleeep')
+    #             time.sleep(.25)
 
-            print('now resending packet', recv_header)
-            #print(self.broken_packets)
-            self.socket.sendto(d_bytes, (self.dst_ip, self.dst_port))
+    def resend(self, data_bytes: bytes):
+        # if self.close_now : return
+        data_header = unpack('i', data_bytes[24:28])[0]
 
-            if recv_header in self.broken_packets:
+        if data_header in self.broken_packets:
+            try:
+                self.socket.sendto(data_bytes, (self.dst_ip, self.dst_port))
+                # Timer(0.25, self.retransmit,[pack('i', data_header)]).start()
+            except Exception as e:
+                print("ERROR IN RETRANSMIT", e)
                 return
             else:
-                time.sleep(.25)
+                Timer(0.25, self.resend, [data_bytes]).start()
+
+    def retransmit_fin(self, data_bytes: bytes):
+        # if self.close_now : return
+        # checksum = hashlib.md5(pack('i', 1)).digest()
+        fin = checksum + pack('i', 1) + pack('i', self.sequence_header)
+        if 1 in self.sent_buffer:
+            try:
+                self.socket.sendto(fin, (self.dst_ip, self.dst_port))
+            except Exception as e:
+                print("ERROR IN RETRANSMITTING CLOSE", e)
+                return
+            else:
+                Timer(0.25, self.retransmit_close).start()
+
+
 
     def close(self) -> None:
         """Cleans up. It should block (wait) until the Streamer is done with all
@@ -234,9 +285,14 @@ class Streamer:
             fin_hash = hashlib.md5(pack('i', 1) + pack('i', 0) + pack('i', self.seq_num)).digest()
             fin_pack = fin_hash + fin_header
             self.socket.sendto(fin_pack, (self.dst_ip, self.dst_port))
-            Timer(.25, self.resend, [fin_pack]).start()
+
+
             self.broken_packets[self.seq_num] = fin_pack
             self.finack = False
+
+            Timer(.25, self.resend, [fin_pack]).start()
+
+
 
             #time.sleep(.25)
 
@@ -258,4 +314,5 @@ class Streamer:
             time.sleep(2)
             self.closed = True
             self.socket.stoprecv()
+
             return
