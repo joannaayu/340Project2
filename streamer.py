@@ -136,21 +136,26 @@ class Streamer:
 
                 if fin_header == 1:
                     if hash_check == digested_data:
-                        #print('HASH SUCCESS IN FIN CHECK', hash_check, digested_data)
                         if ack_header == 0:
                             if hash_check == digested_data:
-                                #print('HASH SUCCESS IN FINACK', hash_check, digested_data)
+                                print('HASH SUCCESS IN SETTING FINACK', hash_check, digested_data)
+                                print(self.finack)
                                 header = pack('i', 1) + pack('i', 1) + pack('i', recv_header)
+                                hash = hashlib.md5(pack('i', fin_header) + pack('i', ack_header) + pack('i', recv_header)).digest()
+                                fin_ack_pack = hash + header
                                 self.fin = True
                                 self.finack = True
 
-                                self.socket.sendto(header, (self.dst_ip, self.dst_port))
+                                self.socket.sendto(fin_ack_pack, (self.dst_ip, self.dst_port))
+                                print('SENDING FINACK')
 
-                        else:
-                            print('FINACK RECV')
-                            self.finack = True
-                            self.fin = True
-                            self.close()
+                        elif ack_header == 1:
+                            if hash_check == digested_data:
+                                print('HASH SUCCESS IN RECEIVING FINACK', hash_check, digested_data)
+                                print('FINACK RECV')
+                                self.finack = True
+                                self.fin = True
+                                self.close()
 
                 elif fin_header == 0 and ack_header == 0:
                     if hash_check == digested_data:
@@ -200,7 +205,8 @@ class Streamer:
                 time.sleep(.25)
 
                 if self.finack == False:
-                    self.socket.sendto(fin_header, (self.dst_ip, self.dst_port))
+                    self.socket.sendto(fin_pack, (self.dst_ip, self.dst_port))
+                    print('sending finack again, wasnt recieved')
 
                 else:
                     break
