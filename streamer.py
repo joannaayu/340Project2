@@ -22,16 +22,17 @@ class Streamer:
         self.dst_ip = dst_ip
         self.dst_port = dst_port
 
-        #sequence numbers
-        self.seq_num = 0
-        self.recv_num = 0
+        #sequence numbers for implementing Nagle's Algorithm
+        self.seq_num = 2
 
+        self.recv_num = 2
+        self.fin_num = 1
 
-        self.fin_num = 0
-        self.ack_num = 0
+        #used for fin and ack flags
+        # self.fin_num = 0
+        # self.ack_num = 0
 
         #receive buffer
-        # self.s_buff = {}
         self.r_buff = {}
 
         self.closed = False
@@ -51,15 +52,16 @@ class Streamer:
         """Note that data_bytes can be larger than one packet."""
         # Your code goes here!  The code below should be changed!
 
-        while len(data_bytes) > 1444:
+        while len(data_bytes) > 1452:
 
             self.r_buff = {}
-            header = pack('i', 0) + pack('i', 0) + pack('i', self.seq_num)
-            hash = hashlib.md5(pack('i', self.fin_num) + pack('i', self.ack_num) + pack('i', self.seq_num) + data_bytes[0:1444])
+            # header = pack('i', 0) + pack('i', 0) + pack('i', self.seq_num)
+            header = pack('i', self.seq_num)
+            hash = hashlib.md5(pack('i', self.seq_num) + data_bytes[0:1452])
             digested_hash = hash.digest()
             #print(digested_hash)
-            sbytes = digested_hash + header + data_bytes[0:1444]
-            data_bytes = data_bytes[1444:]
+            sbytes = digested_hash + header + data_bytes[0:1452]
+            data_bytes = data_bytes[1452:]
 
             self.socket.sendto(sbytes, (self.dst_ip, self.dst_port))
 
@@ -78,8 +80,8 @@ class Streamer:
             self.seq_num = self.seq_num + 1
             # self.s_buff[self.seq_num] = sbytes
 
-        header = pack('i', 0) + pack('i', 0) + pack('i', self.seq_num)
-        hash = hashlib.md5(pack('i', self.fin_num) + pack('i', self.ack_num) + pack('i', self.seq_num) + data_bytes)
+        header = pack('i', self.seq_num)
+        hash = hashlib.md5(pack('i', self.seq_num) + data_bytes)
         digested_hash = hash.digest()
         #print('DIGESTED HASH IN SEND', digested_hash)
         sbytes = digested_hash + header + data_bytes
@@ -123,57 +125,73 @@ class Streamer:
 
                 data, addr = self.socket.recvfrom()
 
+                if len(data) == 0:
+                    return
+
                 hash_check = data[0:16]
                 #print('HASH CHECK IN LISTENER', hash_check)
 
-                fin_header = unpack('i', data[16:20])[0]
-                ack_header = unpack('i', data[20:24])[0]
-                recv_header = unpack('i', data[24:28])[0]
+
+                # fin_header = unpack('i', data[16:20])[0]
+                # ack_header = unpack('i', data[20:24])[0]
+                recv_header = unpack('i', data[16:20])[0]
 
                 digested_data = hashlib.md5(data[16:]).digest()
                 #print('DIGESTED DATA', digested_data)
 
-                if fin_header == 1:
+                if recv_header == 1:
                     if hash_check == digested_data:
+                        header = pack('i', -1)
+                        recv_header = -1
+                        hash = hashlib.md5(pack('i', recv_header)).digest()
+                        fin_ack_pack = hash + header
+                        self.fin = True
+                        self.finack = True
+
+                        self.socket.sendto(fin_ack_pack, (self.dst_ip, self.dst_port))
+                        print('SENDING FINACK')
+
                     #print('HASH SUCCESS IN FIN CHECK', hash_check, digested_data)
-                        if ack_header == 0:
-                            if hash_check == digested_data:
-                                #print('HASH SUCCESS IN FINACK', hash_check, digested_data)
-                                header = pack('i', 1) + pack('i', 1) + pack('i', recv_header)
-                                ack_header = 1
-                                hash = hashlib.md5(pack('i', fin_header) + pack('i', ack_header) + pack('i', recv_header)).digest()
-                                fin_ack_pack = hash + header
-                                self.fin = True
-                                self.finack = True
+                        # if ack_header == 0:
+                        #     if hash_check == digested_data:
+                        #         #print('HASH SUCCESS IN FINACK', hash_check, digested_data)
+                        #         header = pack('i', 1) + pack('i', 1) + pack('i', recv_header)
+                        #         ack_header = 1
+                        #         hash = hashlib.md5(pack('i', fin_header) + pack('i', ack_header) + pack('i', recv_header)).digest()
+                        #         fin_ack_pack = hash + header
+                        #         self.fin = True
+                        #         self.finack = True
+                        #
+                        #         self.socket.sendto(fin_ack_pack, (self.dst_ip, self.dst_port))
+                        #         print('SENDING FINACK')
 
-                                self.socket.sendto(fin_ack_pack, (self.dst_ip, self.dst_port))
-                                print('SENDING FINACK')
+                elif recv_header == -1:
+                    if hash_check == digested_data:
+                        # print('HASH SUCCESS IN RECEIVING FINACK', hash_check, digested_data)
+                        print('FINACK RECV')
+                        self.finack = True
+                        self.fin = True
+                        self.close()
 
-                        elif ack_header == 1:
-                            if hash_check == digested_data:
-                                print('HASH SUCCESS IN RECEIVING FINACK', hash_check, digested_data)
-                                print('FINACK RECV')
-                                self.finack = True
-                                self.fin = True
-                                self.close()
-
-                elif fin_header == 0 and ack_header == 0:
+                elif recv_header > 0:
                     if hash_check == digested_data:
                         #print('HASH SUCCESS IN SECOND ELIF', hash_check, digested_data)
-                        data = data[28:]
+                        data = data[20:]
                         self.r_buff[recv_header] = data
 
-                        ack_header = 1
+                        # ack_header = 1
                         self.ack = True
 
-                        header = pack('i', fin_header) + pack('i', ack_header) + pack('i', recv_header)
-                        hash = hashlib.md5(pack('i', fin_header) + pack('i', ack_header) + pack('i', recv_header)).digest()
+                        recv_header = (-1 * recv_header)
+
+                        header = pack('i', recv_header)
+                        hash = hashlib.md5(pack('i', recv_header)).digest()
                         packet_ack = hash + header
                         self.socket.sendto(packet_ack, (self.dst_ip, self.dst_port))
 
                     #print('ack sent', recv_header, self.ack)
 
-                elif fin_header == 0 and ack_header == 1:
+                elif recv_header < 0:
                     if hash_check == digested_data:
                         self.ack = True
                         print('ack recv', recv_header, self.ack)
@@ -189,9 +207,11 @@ class Streamer:
         # your code goes here, especially after you add ACKs and retransmissions.
 
         if self.fin == False:
-            fin_header = pack('i', 1) + pack('i', 0) + pack('i', self.seq_num)
-            fin_hash = hashlib.md5(pack('i', 1) + pack('i', 0) + pack('i', self.seq_num)).digest()
+
+            fin_header = pack('i', self.fin_num)
+            fin_hash = hashlib.md5(pack('i', self.fin_num)).digest()
             fin_pack = fin_hash + fin_header
+
             self.socket.sendto(fin_pack, (self.dst_ip, self.dst_port))
             self.finack = False
 
