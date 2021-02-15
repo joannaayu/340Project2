@@ -78,8 +78,9 @@ class Streamer:
             #         break
 
             data_bytes = data_bytes[1444:]
+            #packed_seq = pack('i', self.seq_num)
             self.broken_packets[self.seq_num] = sbytes
-            Timer(.25, self.resend, [sbytes]).start()
+            Timer(0.25, self.resend, [pack('i', self.seq_num)]).start()
             self.seq_num = self.seq_num + 1
 
         header = pack('i', 0) + pack('i', 0) + pack('i', self.seq_num)
@@ -90,7 +91,8 @@ class Streamer:
         #print('SBYTES BEFORE SEND', sbytes)
         self.socket.sendto(sbytes, (self.dst_ip, self.dst_port))
         self.broken_packets[self.seq_num] = sbytes
-        Timer(.25, self.resend, [sbytes]).start()
+        #packed_seq = pack('i', self.seq_num)
+        Timer(0.25, self.resend, [pack('i', self.seq_num)]).start()
         self.seq_num = self.seq_num + 1
         self.ack = False
 
@@ -114,12 +116,16 @@ class Streamer:
 
                 data = self.r_buff[self.recv_num]
                 #cleans up the r_buff after packet is sent to instance 1
-                del self.r_buff[self.recv_num]
-                #self.r_buff.pop(self.recv_num)
+                self.r_buff.pop(self.recv_num)
                 self.recv_num += 1
                 return data
 
-
+    # def sendACK(self, d_bytes: bytes):
+    #     try:
+    #         hash = hashlib.md5(d_bytes).digest()
+    #         self.socket.sendto(hash + d_bytes, (self.dst_ip, self.dst_port))
+    #     except:
+    #         print('error in sendACK oops')
 
     def listener(self):
         #code taken from the project page so far
@@ -128,6 +134,7 @@ class Streamer:
 
                 data, addr = self.socket.recvfrom()
 
+
                 hash_check = data[0:16]
                 #print('HASH CHECK IN LISTENER', hash_check)
 
@@ -135,47 +142,48 @@ class Streamer:
                 ack_header = unpack('i', data[20:24])[0]
                 recv_header = unpack('i', data[24:28])[0]
 
-
                 digested_data = hashlib.md5(data[16:]).digest()
                 #print('DIGESTED DATA', digested_data)
 
                 if fin_header == 1:
-                    if hash_check == digested_data:
-                        if ack_header == 0:
-                            if hash_check == digested_data:
-                                #print('FIN CASE, DATA IS', fin_header, ack_header, recv_header, self.fin, self.finack)
-                                header = pack('i', 1) + pack('i', 1) + pack('i', recv_header)
-                                ack_header = 1
-                                hash = hashlib.md5(pack('i', fin_header) + pack('i', ack_header) + pack('i', recv_header)).digest()
-                                fin_ack_pack = hash + header
-                                self.fin = True
-                                self.finack = True
-                                #del self.broken_packets[recv_header]
-                                #self.broken_packets.pop(recv_header)
+                    if ack_header == 0:
+                        if hash_check == digested_data:
+                            print('FIN CASE, DATA IS', fin_header, ack_header, recv_header, self.fin, self.finack)
+                            header = pack('i', 1) + pack('i', 1) + pack('i', recv_header)
+                            ack_header = 1
+                            hash = hashlib.md5(pack('i', fin_header) + pack('i', ack_header) + pack('i', recv_header)).digest()
+                            fin_ack_pack = hash + header
+                            self.fin = True
+                            self.finack = True
+                            #del self.broken_packets[recv_header]
+                            #self.broken_packets.pop(recv_header)
 
-                                #print('LAST PACKET AND RECV HEADER', self.last_packet, recv_header)
-                                #print('last seq_num', self.last_packet)
-                                # print('in the fin case')
+                            print('LAST PACKET AND RECV HEADER', self.last_packet, recv_header)
+                            #print('last seq_num', self.last_packet)
+                            # print('in the fin case')
 
-                                if self.last_packet == (recv_header - 1):
+                            if self.last_packet == (recv_header - 1):
 
-                                    self.socket.sendto(fin_ack_pack, (self.dst_ip, self.dst_port))
+                                print('SENDING FINACK', fin_header, ack_header, recv_header, self.fin, self.finack)
+                                #Timer(.05, self.sendACK, [fin_pack]).start()
+                                self.socket.sendto(fin_ack_pack, (self.dst_ip, self.dst_port))
 
-                                    # print(fin_header, ack_header, recv_header)
-                                    # print('sending recv header', recv_header)
-                                    # print('sending last seq_num', self.last_packet)
-                                    #print('SENDING FINACK', fin_header, ack_header, recv_header, self.fin, self.finack)
+                                # print(fin_header, ack_header, recv_header)
+                                # print('sending recv header', recv_header)
+                                # print('sending last seq_num', self.last_packet)
 
-                        elif ack_header == 1:
-                            if hash_check == digested_data:
-                                #print('HASH SUCCESS IN RECEIVING FINACK', hash_check, digested_data)
-                                #self.finack = True
-                                if recv_header in self.broken_packets:
-                                    del self.broken_packets[recv_header]
-                                #print('RECV FINACK', fin_header, ack_header, recv_header, self.fin, self.finack)
-                                self.finack = True
-                                self.fin = True
-                                self.close()
+                elif fin_header == 1:
+                    if ack_header == 1:
+                        print('FINACK DETECTED', fin_header, ack_header, recv_header, self.fin, self.finack)
+                        if hash_check == digested_data:
+                            #print('HASH SUCCESS IN RECEIVING FINACK', hash_check, digested_data)
+                            #self.finack = True
+                            if recv_header in self.broken_packets:
+                                self.broken_packets.pop(recv_header)
+                            print('RECV FINACK', fin_header, ack_header, recv_header)
+                            self.finack = True
+                            self.fin = True
+                            self.close()
 
                 elif fin_header == 0 and ack_header == 0:
                     if hash_check == digested_data:
@@ -192,9 +200,10 @@ class Streamer:
                         hash = hashlib.md5(pack('i', fin_header) + pack('i', ack_header) + pack('i', recv_header)).digest()
                         packet_ack = hash + header
                         self.socket.sendto(packet_ack, (self.dst_ip, self.dst_port))
+                        #Timer(.5, self.sendACK, [packet_ack]).start()
 
                         # print('ack sent', recv_header)
-                        #print('SENDING ACK', fin_header, ack_header, recv_header, self.fin, self.finack)
+                        print('SENDING ACK', fin_header, ack_header, recv_header)
 
                 elif fin_header == 0 and ack_header == 1:
                     if hash_check == digested_data:
@@ -203,8 +212,8 @@ class Streamer:
                         self.ack = True
                         #print('ack recv', recv_header, self.ack)
                         if recv_header in self.broken_packets:
-                            del self.broken_packets[recv_header]
-                        #print('RECV ACK', fin_header, ack_header, recv_header, self.fin, self.finack)
+                            self.broken_packets.pop(recv_header)
+                        print('RECV ACK', fin_header, ack_header, recv_header, self.fin, self.finack)
                         #self.broken_packets.pop(recv_header)
 
 
@@ -213,26 +222,45 @@ class Streamer:
                 print(e)
 
     def resend(self, d_bytes: bytes) -> None:
-        recv_header = unpack('i', d_bytes[24:28])[0]
-        #print(self.broken_packets)
-        #print('in resend function', recv_header)
-        counter = 0
+        recv_header = unpack('i', d_bytes)[0]
+
+        if recv_header in self.broken_packets:
+            print('in our buffer', recv_header)
 
         if recv_header not in self.broken_packets:
-            #print('%s packet popped' % (recv_header))
-            return
-
+            print('not found in buffer2', recv_header)
 
         while recv_header in self.broken_packets:
-
-            #print('now resending packet', recv_header)
             #print(self.broken_packets)
-            self.socket.sendto(d_bytes, (self.dst_ip, self.dst_port))
+            try:
+                print('now resending packet', recv_header)
+                self.socket.sendto(self.broken_packets[recv_header], (self.dst_ip, self.dst_port))
 
-            if recv_header not in self.broken_packets:
-                return
+            except Exception as e:
+                print("resend failed, uh o!")
+                print(e)
+
+            # if recv_header not in self.broken_packets:
+            #     return
             else:
-                time.sleep(.25)
+                time.sleep(0.25)
+                #Timer(.25, self.resend, [d_bytes]).start()
+        #print(self.broken_packets)
+        #print('in resend function', recv_header)
+        #
+        # if recv_header not in self.broken_packets:
+        #     #print('%s packet popped' % (recv_header))
+        #     return
+
+        # if recv_header in self.broken_packets:
+        #     self.socket.sendto(d_bytes, (self.dst_ip, self.dst_port))
+        #
+        #     if recv_header in self.broken_packets:
+        #         Timer(.25, self.resend, [d_bytes]).start()
+        #
+        #     else:
+        #         return
+
 
     def close(self) -> None:
         """Cleans up. It should block (wait) until the Streamer is done with all
@@ -247,9 +275,10 @@ class Streamer:
             #print('CLOSE SEQ NUM', self.seq_num)
             self.broken_packets[self.seq_num] = fin_pack
             self.socket.sendto(fin_pack, (self.dst_ip, self.dst_port))
+            self.fin = True
             self.finack = False
 
-            Timer(.25, self.resend, [fin_pack]).start()
+            Timer(0.25, self.resend, [pack('i', self.seq_num)]).start()
 
             #time.sleep(.25)
 
